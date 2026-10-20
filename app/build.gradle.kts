@@ -15,8 +15,31 @@ android {
         // MediaStore (Documents/) sem permissão de armazenamento.
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "1.3.0"
+    }
+
+    // Duas versões do mesmo código:
+    //  - display:  painel do carro (Galaxy S23). Mantém o applicationId original, então
+    //              atualiza o app já instalado sem perder as corridas salvas.
+    //  - analysis: análise de dados (Galaxy Tab S9 ou qualquer Android). Não usa GPS nem
+    //              sensores; importa os pacotes .ecooctano.zip gerados pelo display.
+    flavorDimensions += "mode"
+    productFlavors {
+        create("display") {
+            dimension = "mode"
+            buildConfigField("String", "APP_MODE", "\"display\"")
+            resValue("string", "app_name", "Eco Octano Display")
+            manifestPlaceholders["screenOrientation"] = "landscape"
+        }
+        create("analysis") {
+            dimension = "mode"
+            applicationIdSuffix = ".analysis"
+            versionNameSuffix = "-analysis"
+            buildConfigField("String", "APP_MODE", "\"analysis\"")
+            resValue("string", "app_name", "Eco Octano Análise")
+            manifestPlaceholders["screenOrientation"] = "unspecified"
+        }
     }
 
     buildTypes {

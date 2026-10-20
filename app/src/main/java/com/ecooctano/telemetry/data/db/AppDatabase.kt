@@ -36,6 +36,13 @@ interface TelemetryDao {
     @Query("SELECT * FROM race_sessions WHERE id = :sessionId")
     suspend fun getSession(sessionId: Long): RaceSession?
 
+    /** Mesma corrida já existente (usado para não duplicar na importação). */
+    @Query("SELECT * FROM race_sessions WHERE startedAtEpochMs = :startedAt AND durationMs = :durationMs LIMIT 1")
+    suspend fun findSame(startedAt: Long, durationMs: Long): RaceSession?
+
+    @Query("SELECT id FROM race_sessions ORDER BY startedAtEpochMs DESC")
+    suspend fun allSessionIds(): List<Long>
+
     @Query("SELECT * FROM laps WHERE sessionId = :sessionId ORDER BY lapNumber ASC")
     suspend fun getLaps(sessionId: Long): List<LapData>
 

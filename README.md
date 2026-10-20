@@ -2,13 +2,43 @@
 
 Painel de telemetria (cockpit) e data logger do veículo de eficiência energética da equipe **Eco Octano**, otimizado para o **Samsung Galaxy S23** em paisagem.
 
+## Duas versões (mesmo código)
+
+| Versão | Aparelho | App instalado | O que faz |
+|---|---|---|---|
+| **display** | Galaxy S23 no carro | *Eco Octano Display* | Mapa, velocidade, tempo decorrido e distância. Grava a corrida (5 Hz + IMU 100 Hz) |
+| **analysis** | Galaxy Tab S9 ou qualquer Android | *Eco Octano Análise* | Importa corridas, replay no mapa, gráficos sincronizados, tabela de voltas. Não usa GPS |
+
+As duas podem ficar instaladas no mesmo aparelho. A versão display mantém o mesmo identificador do app anterior: ela atualiza o app do S23 sem perder corridas.
+
 ## Como compilar
 
-1. Abra a pasta no **Android Studio** (Koala 2024.1.1 ou mais recente). Ele cria o `local.properties` com o caminho do SDK.
-2. Instale o SDK Platform **API 34** se o Studio pedir.
-3. Rode a configuração `app` no S23 (com depuração USB ligada) ou use `./gradlew assembleDebug`.
+1. Abra a pasta no **Android Studio**.
+2. Em **View → Tool Windows → Build Variants**, escolha a variante do módulo `app`:
+   - `displayDebug` para o S23;
+   - `analysisDebug` para o Tab S9 (ou outro aparelho).
+3. Conecte o aparelho e clique em ▶. Para gerar os dois APKs de uma vez, use `./gradlew assembleDebug`. Eles saem em `app/build/outputs/apk/<versão>/debug/`.
 
 Stack: AGP 8.5.2 · Gradle 8.9 · Kotlin 2.0.20 · KSP 2.0.20-1.0.25 · Compose BOM 2024.09.03 (Material 3) · Room 2.6.1 · OSMDroid 6.1.18 · Play Services Location 21.3.0 · minSdk 29 / targetSdk 34.
+
+## Levar corridas para outro aparelho
+
+1. **No S23 (display):** toque na tela para mostrar os controles, depois **⋮ → Corridas salvas**. Use o botão de compartilhar de uma corrida, ou **COMPARTILHAR TODAS**. O app gera um pacote **`.ecooctano.zip`** com tudo: resumo, voltas, pontos de 5 Hz e o arquivo IMU de 100 Hz.
+2. **Envie o pacote** pelo meio que preferir: Quick Share (mais rápido entre aparelhos Samsung), Google Drive, WhatsApp, e-mail ou cabo USB. Depois de cada corrida salva, o pacote também fica em `Documents/EcoOctano_Telemetry`.
+3. **No Tab S9 (análise):** toque em **IMPORTAR** e escolha o arquivo (Quick Share salva em *Downloads*). Também é possível tocar no arquivo e escolher "Abrir com Eco Octano Análise".
+4. Corridas repetidas (mesmo início e duração) são ignoradas. Importar o mesmo pacote duas vezes não duplica nada.
+
+O pacote é um `.zip` comum: no computador, abra e use `session.json` ou `imu.csv` direto em Python, MATLAB ou Excel.
+
+## Proteção contra marcação de tela (display)
+
+A tela OLED do S23 pode reter imagem quando os mesmos pixels ficam acesos por muito tempo. O display faz o seguinte:
+- **Deslocamento de pixels:** a cada 30 s, todo o conteúdo anda até 4 dp num ciclo de 9 posições.
+- **Controles que somem:** durante a corrida, os botões desaparecem 6 s após o último toque. Um toque os traz de volta.
+- **Escurecimento automático:** sem corrida e sem toque por 90 s, a tela escurece. Um toque a acorda.
+- **Sem elementos fixos claros:** fundo preto real, sem bordas de cartões, rótulos em cinza escuro e sem barra lateral. O aviso de GPS só aparece quando há problema.
+
+Também ajuda reduzir o brilho quando não estiver sob sol forte e não deixar o app aberto parado fora da corrida.
 
 ## Estrutura
 
@@ -19,7 +49,8 @@ app/src/main/java/com/ecooctano/telemetry/
 ├── data/
 │   ├── model/TelemetryModels.kt # RaceSession, LapData, TelemetryPoint (Room) + TrackPoint
 │   ├── db/AppDatabase.kt        # Room DB + DAO
-│   ├── export/TelemetryExporter.kt  # CSV + JSON → Documents/EcoOctano_Telemetry
+│   ├── export/TelemetryExporter.kt  # CSV + JSON + pacote .ecooctano.zip → Documents/EcoOctano_Telemetry
+│   ├── transfer/SessionPackageReader.kt  # Importa pacotes .ecooctano.zip / .json
 │   └── TelemetryRepository.kt
 ├── recording/
 │   ├── RaceRecorder.kt            # Dono da corrida (nível do app): gravação 5 Hz, voltas, salvar
@@ -30,10 +61,12 @@ app/src/main/java/com/ecooctano/telemetry/
 │   ├── LocationManager.kt         # FusedLocationProviderClient, alta precisão, 200 ms
 │   └── KalmanTrackFilter.kt       # Fusão GPS + acelerômetro com estimativa de viés
 └── ui/
-    ├── TelemetryViewModel.kt      # Estado do modo Ao Vivo e do modo Retrospectiva
+    ├── display/                   # Versão DISPLAY: cockpit, proteção contra burn-in, corridas salvas
+    ├── analysis/                  # Versão ANÁLISE: lista responsiva, replay, gráficos, importação
     ├── map/                       # OSMDroid no Compose + traçado colorido por velocidade
-    ├── screens/                   # LiveDashboard, Replay, PermissionGate, Root
-    ├── components/                # Cards, formatação ("N/A")
+    ├── screens/PermissionGate.kt  # Permissão de localização (só display)
+    ├── components/                # Formatação, compartilhamento, itens de lista
+    ├── UiEvents.kt                # Snackbar e compartilhamento comuns às duas versões
     └── theme/                     # Tema escuro de alto contraste
 ```
 
@@ -41,11 +74,12 @@ app/src/main/java/com/ecooctano/telemetry/
 
 | Ação | Como |
 |---|---|
+| Mostrar os controles | Toque em qualquer lugar da tela (durante a corrida eles somem após 6 s) |
 | Iniciar / pausar / retomar | Botão verde/âmbar **INICIAR** |
 | Marcar volta | **VOLTA**: só registra o número da volta nos dados; o piloto vê apenas o tempo decorrido. Toques com menos de 2 s de intervalo são ignorados |
 | Zerar a sessão | **RESETAR** e depois confirmar no diálogo |
 | Salvar | **SALVAR**: grava no Room e exporta `.csv` + `.json`; o snackbar oferece **COMPARTILHAR** |
-| Zerar a inclinação | Pressione e segure o card **INCLINAÇÃO** com o carro parado no plano |
+| Zerar a inclinação | **⋮ → Zerar inclinação**, com o carro parado no plano |
 | Seguir o carro no mapa | Botão de mira no canto do mapa (desligue para arrastar o mapa) |
 
 Os arquivos ficam em `Documents/EcoOctano_Telemetry` (via MediaStore, sem permissão de armazenamento). Se o MediaStore falhar, o app grava em `Android/data/com.ecooctano.telemetry/files/Documents/EcoOctano_Telemetry`.

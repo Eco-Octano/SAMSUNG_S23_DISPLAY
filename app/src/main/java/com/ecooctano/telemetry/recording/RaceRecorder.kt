@@ -20,17 +20,15 @@ import com.ecooctano.telemetry.sensors.LocationManager
 import com.ecooctano.telemetry.sensors.SensorReadings
 import com.ecooctano.telemetry.sensors.SensorTelemetryManager
 import com.ecooctano.telemetry.sensors.WorldAccelListener
+import com.ecooctano.telemetry.ui.UiEvents
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -67,12 +65,6 @@ data class LiveSessionState(
     val isSessionActive: Boolean get() = status != RaceStatus.IDLE
 }
 
-data class UiMessage(
-    val id: Long,
-    val text: String,
-    val shareFiles: List<File> = emptyList(),
-)
-
 /**
  * Dono da corrida em andamento. Vive no nível do Application (não da tela), então a gravação
  * continua com a tela apagada, com outro app aberto ou se a Activity for recriada.
@@ -83,6 +75,7 @@ data class UiMessage(
 class RaceRecorder(
     private val app: Application,
     private val repository: TelemetryRepository,
+    private val events: UiEvents,
 ) {
     companion object {
         private const val TAG = "RaceRecorder"
@@ -117,12 +110,6 @@ class RaceRecorder(
     private val _track = MutableStateFlow(TrackSnapshot.EMPTY)
     val track: StateFlow<TrackSnapshot> = _track.asStateFlow()
 
-    private val _message = MutableStateFlow<UiMessage?>(null)
-    val message: StateFlow<UiMessage?> = _message.asStateFlow()
-
-    private val _shareRequests = MutableSharedFlow<List<File>>(extraBufferCapacity = 4)
-    val shareRequests: SharedFlow<List<File>> = _shareRequests.asSharedFlow()
-
     // ---- Estado da corrida (somente Main thread) ----
     private var recordedPoints = ArrayList<TelemetryPoint>()
     private var trackPoints = ArrayList<TrackPoint>()
@@ -145,7 +132,6 @@ class RaceRecorder(
     private var recordJob: Job? = null
     private var uiTickJob: Job? = null
     private var uiVisible = false
-    private var messageCounter = 0L
 
     init {
         sensorManager.worldAccelListener = WorldAccelListener { east, north, ts ->
@@ -314,7 +300,8 @@ class RaceRecorder(
                         result.publicLocation != null -> append(" em ${result.publicLocation}")
                     }
                 }
-                postMessage(text, result.files)
+                // Pacote .ecooctano.zip (para outro aparelho) + CSV (planilha).
+                postMessage(text, result.files.filter { it.name.endsWith(".ecooctano.zip") || it.name.endsWith(".csv") && !it.name.endsWith("_imu.csv") })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -327,18 +314,7 @@ class RaceRecorder(
 
     // ================================================================ Mensagens
 
-    fun postMessage(text: String, shareFiles: List<File> = emptyList()) {
-        messageCounter++
-        _message.value = UiMessage(messageCounter, text, shareFiles)
-    }
-
-    fun consumeMessage(id: Long) {
-        _message.update { if (it?.id == id) null else it }
-    }
-
-    fun requestShare(files: List<File>) {
-        _shareRequests.tryEmit(files)
-    }
+    private fun postMessage(text: String, shareFiles: List<File> = emptyList()) = events.post(text, shareFiles)
 
     // ================================================================ Internos
 

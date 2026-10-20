@@ -12,16 +12,20 @@ import com.ecooctano.telemetry.data.model.RaceSession
 import com.ecooctano.telemetry.data.model.TelemetryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStreamWriter
+import java.io.Writer
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * Gera os arquivos brutos (.csv e .json) de uma corrida.
@@ -37,6 +41,10 @@ class TelemetryExporter(context: Context) {
         private const val TAG = "TelemetryExporter"
         private const val MIME_CSV = "text/csv"
         private const val MIME_JSON = "application/json"
+        private const val MIME_ZIP = "application/zip"
+        /** Extensão do pacote de transferência entre aparelhos (é um .zip comum). */
+        const val PACKAGE_EXTENSION = ".ecooctano.zip"
+        const val PACKAGE_FORMAT = "ecooctano-package"
 
         private val CSV_HEADER = listOf(
             "timestamp_epoch_ms", "timestamp_iso", "elapsed_ms", "lap",
@@ -56,6 +64,57 @@ class TelemetryExporter(context: Context) {
     /** Pasta interna dos arquivos exportados (compartilhada via FileProvider). */
     fun exportsDir(): File = File(appContext.filesDir, "exports")
 
+    /** Nome-base dos arquivos de uma corrida (sem extensão). */
+    fun baseNameFor(session: RaceSession): String =
+        "EcoOctano_${fileStamp(session.startedAtEpochMs)}_S${session.id}"
+
+    /** Uma corrida dentro de um pacote de transferência. */
+    data class PackageEntry(
+        val session: RaceSession,
+        val laps: List<LapData>,
+        val points: List<TelemetryPoint>,
+        val imu: File?,
+    )
+
+    /**
+     * Gera um pacote .ecooctano.zip com uma ou mais corridas:
+     *   manifest.json
+     *   session_1/session.json   (resumo, voltas e todos os pontos de 5 Hz)
+     *   session_1/imu.csv        (dados brutos ~100 Hz, se houver)
+     * É o formato usado para importar em outro aparelho (versão de análise).
+     */
+    fun writePackage(target: File, entries: List<PackageEntry>) {
+        target.parentFile?.mkdirs()
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(target), 64 * 1024)).use { zip ->
+            zip.putNextEntry(ZipEntry("manifest.json"))
+            val manifest = OutputStreamWriter(zip, Charsets.UTF_8)
+            val mw = JsonWriter(manifest)
+            mw.beginObject()
+            mw.name("format").value(PACKAGE_FORMAT)
+            mw.name("formatVersion").value(1L)
+            mw.name("createdAtEpochMs").value(System.currentTimeMillis())
+            mw.name("sessionCount").value(entries.size.toLong())
+            mw.endObject()
+            mw.flush()
+            zip.closeEntry()
+
+            entries.forEachIndexed { index, e ->
+                val dir = "session_${index + 1}"
+                zip.putNextEntry(ZipEntry("$dir/session.json"))
+                val writer = OutputStreamWriter(zip, Charsets.UTF_8)
+                writeJsonTo(writer, e.session, e.laps, e.points)
+                writer.flush()
+                zip.closeEntry()
+                val imu = e.imu
+                if (imu != null && imu.exists()) {
+                    zip.putNextEntry(ZipEntry("$dir/imu.csv"))
+                    imu.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
+        }
+    }
+
     private val appContext = context.applicationContext
 
     suspend fun export(
@@ -67,7 +126,7 @@ class TelemetryExporter(context: Context) {
         val dir = exportsDir()
         if (!dir.exists() && !dir.mkdirs()) throw IOException("Não foi possível criar ${dir.absolutePath}")
 
-        val baseName = "EcoOctano_${fileStamp(session.startedAtEpochMs)}_S${session.id}"
+        val baseName = baseNameFor(session)
         val csv = File(dir, "$baseName.csv")
         val json = File(dir, "$baseName.json")
         writeCsv(csv, points)
@@ -76,6 +135,15 @@ class TelemetryExporter(context: Context) {
         val files = mutableListOf(csv to MIME_CSV, json to MIME_JSON)
         val imu = rawImu?.takeIf { it.exists() }?.let { src -> moveInto(src, File(dir, "${baseName}_imu.csv")) }
         if (imu != null) files.add(imu to MIME_CSV)
+
+        // Pacote para importar em outro aparelho (vai primeiro na lista de compartilhamento).
+        try {
+            val pkg = File(dir, "$baseName$PACKAGE_EXTENSION")
+            writePackage(pkg, listOf(PackageEntry(session, laps, points, imu)))
+            files.add(0, pkg to MIME_ZIP)
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao gerar pacote", e)
+        }
 
         val publicLocation = publish(files)
         ExportResult(files.map { it.first }, publicLocation, imu?.name)
@@ -155,7 +223,17 @@ class TelemetryExporter(context: Context) {
         laps: List<LapData>,
         points: List<TelemetryPoint>,
     ) {
-        JsonWriter(OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8)).use { w ->
+        OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8).use { writeJsonTo(it, session, laps, points) }
+    }
+
+    /** Escreve o JSON da corrida sem fechar [out] (permite gravar dentro de um zip). */
+    private fun writeJsonTo(
+        out: Writer,
+        session: RaceSession,
+        laps: List<LapData>,
+        points: List<TelemetryPoint>,
+    ) {
+        JsonWriter(out).let { w ->
             w.beginObject()
             w.name("app").value("Eco Octano Telemetry")
             w.name("formatVersion").value(1L)
@@ -216,6 +294,7 @@ class TelemetryExporter(context: Context) {
             w.endArray()
 
             w.endObject()
+            w.flush()
         }
     }
 

@@ -7,6 +7,7 @@ import com.ecooctano.telemetry.data.export.TelemetryExporter
 import com.ecooctano.telemetry.data.model.LapData
 import com.ecooctano.telemetry.data.model.RaceSession
 import com.ecooctano.telemetry.data.model.TelemetryPoint
+import com.ecooctano.telemetry.data.transfer.ParsedSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -76,6 +77,73 @@ class TelemetryRepository(
         val loaded = loadSession(sessionId) ?: return@withContext emptyList()
         val imu = loaded.session.imuFileName?.let { File(exporter.exportsDir(), it) }
         exporter.export(loaded.session, loaded.laps, loaded.points, imu).localFiles
+    }
+
+    data class ImportSummary(val imported: Int, val duplicates: Int)
+
+    /** Grava corridas lidas de um pacote; corridas já existentes (mesmo início e duração) são ignoradas. */
+    suspend fun importSessions(parsed: List<ParsedSession>): ImportSummary = withContext(Dispatchers.IO) {
+        var imported = 0
+        var duplicates = 0
+        for (p in parsed) {
+            if (dao.findSame(p.session.startedAtEpochMs, p.session.durationMs) != null) {
+                duplicates++
+                p.imuTemp?.delete()
+                continue
+            }
+            val newId = db.withTransaction {
+                val id = dao.insertSession(p.session.copy(id = 0, exportLocation = null, imuFileName = null))
+                if (p.laps.isNotEmpty()) dao.insertLaps(p.laps.map { it.copy(id = 0, sessionId = id) })
+                p.points.chunked(1_000).forEach { chunk ->
+                    dao.insertPoints(chunk.map { it.copy(id = 0, sessionId = id) })
+                }
+                id
+            }
+            val imuTemp = p.imuTemp
+            if (imuTemp != null && imuTemp.exists()) {
+                val saved = p.session.copy(id = newId)
+                val target = File(exporter.exportsDir().apply { mkdirs() }, "${exporter.baseNameFor(saved)}_imu.csv")
+                val moved = try {
+                    if (!imuTemp.renameTo(target)) {
+                        imuTemp.copyTo(target, overwrite = true)
+                        imuTemp.delete()
+                    }
+                    true
+                } catch (e: Exception) {
+                    Log.e("TelemetryRepository", "Falha ao guardar IMU importado", e)
+                    imuTemp.delete()
+                    false
+                }
+                if (moved) dao.getSession(newId)?.let { dao.updateSession(it.copy(imuFileName = target.name)) }
+            }
+            imported++
+        }
+        ImportSummary(imported, duplicates)
+    }
+
+    /**
+     * Gera um pacote .ecooctano.zip com as corridas pedidas (todas, se [sessionIds] for null).
+     * Pacotes antigos de várias corridas são apagados para não acumular espaço.
+     */
+    suspend fun exportPackage(sessionIds: List<Long>?): File? = withContext(Dispatchers.IO) {
+        val ids = sessionIds ?: dao.allSessionIds()
+        if (ids.isEmpty()) return@withContext null
+        val entries = ids.mapNotNull { id ->
+            val loaded = loadSession(id) ?: return@mapNotNull null
+            val imu = loaded.session.imuFileName?.let { File(exporter.exportsDir(), it) }
+            TelemetryExporter.PackageEntry(loaded.session, loaded.laps, loaded.points, imu)
+        }
+        if (entries.isEmpty()) return@withContext null
+        val dir = exporter.exportsDir().apply { mkdirs() }
+        val target = if (entries.size == 1) {
+            File(dir, exporter.baseNameFor(entries[0].session) + TelemetryExporter.PACKAGE_EXTENSION)
+        } else {
+            dir.listFiles { f -> f.name.startsWith("EcoOctano_pacote_") }?.forEach { it.delete() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+            File(dir, "EcoOctano_pacote_${entries.size}corridas_$stamp${TelemetryExporter.PACKAGE_EXTENSION}")
+        }
+        exporter.writePackage(target, entries)
+        target
     }
 
     suspend fun deleteSession(sessionId: Long) = withContext(Dispatchers.IO) {
