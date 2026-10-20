@@ -53,8 +53,8 @@ import com.ecooctano.telemetry.sensors.GpsReading
 import com.ecooctano.telemetry.sensors.GpsStatus
 import com.ecooctano.telemetry.sensors.SensorReadings
 import com.ecooctano.telemetry.sensors.TemperatureSource
-import com.ecooctano.telemetry.ui.LiveSessionState
-import com.ecooctano.telemetry.ui.RaceStatus
+import com.ecooctano.telemetry.recording.LiveSessionState
+import com.ecooctano.telemetry.recording.RaceStatus
 import com.ecooctano.telemetry.ui.TelemetryViewModel
 import com.ecooctano.telemetry.ui.components.CockpitPanel
 import com.ecooctano.telemetry.ui.components.FitText
@@ -86,8 +86,11 @@ fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modi
     var followCar by rememberSaveable { mutableStateOf(true) }
 
     val currentGps = gps
-    val speedKmh = if (live.gpsFresh) currentGps?.speedKmh else null
-    val carPosition = currentGps?.let { GeoPoint(it.latitude, it.longitude) }
+    // Velocidade e posição exibidas vêm do filtro de Kalman (GPS + acelerômetro).
+    val speedKmh = live.speedKmh
+    val carLat = live.latitude
+    val carLon = live.longitude
+    val carPosition = if (carLat != null && carLon != null) GeoPoint(carLat, carLon) else null
 
     Row(
         modifier.fillMaxSize().padding(8.dp),

@@ -8,6 +8,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ecooctano.telemetry.data.model.LapData
 import com.ecooctano.telemetry.data.model.RaceSession
 import com.ecooctano.telemetry.data.model.TelemetryPoint
@@ -52,7 +54,7 @@ interface TelemetryDao {
 
 @Database(
     entities = [RaceSession::class, LapData::class, TelemetryPoint::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -61,6 +63,16 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         private const val DB_NAME = "ecooctano_telemetry.db"
+
+        /** v2: GPS bruto ao lado do valor fundido + arquivo IMU. Preserva corridas já salvas. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE telemetry_points ADD COLUMN gpsLatitudeRaw REAL")
+                db.execSQL("ALTER TABLE telemetry_points ADD COLUMN gpsLongitudeRaw REAL")
+                db.execSQL("ALTER TABLE telemetry_points ADD COLUMN gpsSpeedRawKmh REAL")
+                db.execSQL("ALTER TABLE race_sessions ADD COLUMN imuFileName TEXT")
+            }
+        }
 
         @Volatile
         private var instance: AppDatabase? = null
@@ -71,7 +83,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DB_NAME,
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instance = it }
             }
     }
 }

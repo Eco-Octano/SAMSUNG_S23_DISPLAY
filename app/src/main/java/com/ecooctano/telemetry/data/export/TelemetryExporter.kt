@@ -43,13 +43,18 @@ class TelemetryExporter(context: Context) {
             "latitude", "longitude", "gps_altitude_m", "gps_accuracy_m", "speed_kmh",
             "accel_x_ms2", "accel_y_ms2", "accel_z_ms2", "g_force",
             "pressure_hpa", "baro_altitude_m", "pitch_deg", "roll_deg", "temperature_c",
+            "gps_latitude_raw", "gps_longitude_raw", "gps_speed_raw_kmh",
         ).joinToString(",")
     }
 
     data class ExportResult(
         val localFiles: List<File>,
         val publicLocation: String?,
+        val imuFileName: String?,
     )
+
+    /** Pasta interna dos arquivos exportados (compartilhada via FileProvider). */
+    fun exportsDir(): File = File(appContext.filesDir, "exports")
 
     private val appContext = context.applicationContext
 
@@ -57,8 +62,9 @@ class TelemetryExporter(context: Context) {
         session: RaceSession,
         laps: List<LapData>,
         points: List<TelemetryPoint>,
+        rawImu: File? = null,
     ): ExportResult = withContext(Dispatchers.IO) {
-        val dir = File(appContext.filesDir, "exports")
+        val dir = exportsDir()
         if (!dir.exists() && !dir.mkdirs()) throw IOException("Não foi possível criar ${dir.absolutePath}")
 
         val baseName = "EcoOctano_${fileStamp(session.startedAtEpochMs)}_S${session.id}"
@@ -67,8 +73,28 @@ class TelemetryExporter(context: Context) {
         writeCsv(csv, points)
         writeJson(json, session, laps, points)
 
-        val publicLocation = publish(listOf(csv to MIME_CSV, json to MIME_JSON))
-        ExportResult(listOf(csv, json), publicLocation)
+        val files = mutableListOf(csv to MIME_CSV, json to MIME_JSON)
+        val imu = rawImu?.takeIf { it.exists() }?.let { src -> moveInto(src, File(dir, "${baseName}_imu.csv")) }
+        if (imu != null) files.add(imu to MIME_CSV)
+
+        val publicLocation = publish(files)
+        ExportResult(files.map { it.first }, publicLocation, imu?.name)
+    }
+
+    /** Move (ou copia, se o rename falhar) o arquivo IMU temporário para a pasta de exportação. */
+    private fun moveInto(src: File, target: File): File? {
+        if (src.absolutePath == target.absolutePath) return target
+        return try {
+            if (target.exists()) target.delete()
+            if (!src.renameTo(target)) {
+                src.copyTo(target, overwrite = true)
+                src.delete()
+            }
+            target
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao mover arquivo IMU", e)
+            null
+        }
     }
 
     // ---------------------------------------------------------------- CSV
@@ -112,6 +138,9 @@ class TelemetryExporter(context: Context) {
                 sb.cell(p.pitchDeg, d2)
                 sb.cell(p.rollDeg, d2)
                 sb.cell(p.temperatureC, d2)
+                sb.cell(p.gpsLatitudeRaw, coord)
+                sb.cell(p.gpsLongitudeRaw, coord)
+                sb.cell(p.gpsSpeedRawKmh, d2)
                 out.write(sb.toString())
                 out.newLine()
             }
@@ -142,6 +171,8 @@ class TelemetryExporter(context: Context) {
             w.name("lapCount").value(session.lapCount)
             w.num("bestLapMs", session.bestLapMs)
             w.name("pointCount").value(session.pointCount)
+            w.name("imuFile").value(session.imuFileName)
+            w.name("positionSource").value("kalman_gps_imu")
             w.endObject()
 
             w.name("laps").beginArray()
@@ -177,6 +208,9 @@ class TelemetryExporter(context: Context) {
                 w.num("pitchDeg", p.pitchDeg)
                 w.num("rollDeg", p.rollDeg)
                 w.num("temperatureC", p.temperatureC)
+                w.num("gpsLatRaw", p.gpsLatitudeRaw)
+                w.num("gpsLonRaw", p.gpsLongitudeRaw)
+                w.num("gpsSpeedRawKmh", p.gpsSpeedRawKmh)
                 w.endObject()
             }
             w.endArray()

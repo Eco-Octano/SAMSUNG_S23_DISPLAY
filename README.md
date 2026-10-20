@@ -21,9 +21,14 @@ app/src/main/java/com/ecooctano/telemetry/
 │   ├── db/AppDatabase.kt        # Room DB + DAO
 │   ├── export/TelemetryExporter.kt  # CSV + JSON → Documents/EcoOctano_Telemetry
 │   └── TelemetryRepository.kt
+├── recording/
+│   ├── RaceRecorder.kt            # Dono da corrida (nível do app): gravação 5 Hz, voltas, salvar
+│   ├── TelemetryRecordingService.kt  # Serviço em primeiro plano: grava com a tela apagada
+│   └── ImuRawLogger.kt            # CSV bruto ~100 Hz (acelerômetro, giroscópio, barômetro)
 ├── sensors/
 │   ├── SensorTelemetryManager.kt  # Acelerômetro linear, giroscópio, vetor de rotação, barômetro, temperatura
-│   └── LocationManager.kt         # FusedLocationProviderClient, alta precisão, 200 ms
+│   ├── LocationManager.kt         # FusedLocationProviderClient, alta precisão, 200 ms
+│   └── KalmanTrackFilter.kt       # Fusão GPS + acelerômetro com estimativa de viés
 └── ui/
     ├── TelemetryViewModel.kt      # Estado do modo Ao Vivo e do modo Retrospectiva
     ├── map/                       # OSMDroid no Compose + traçado colorido por velocidade
@@ -45,8 +50,18 @@ app/src/main/java/com/ecooctano/telemetry/
 
 Os arquivos ficam em `Documents/EcoOctano_Telemetry` (via MediaStore, sem permissão de armazenamento). Se o MediaStore falhar, o app grava em `Android/data/com.ecooctano.telemetry/files/Documents/EcoOctano_Telemetry`.
 
-### Colunas do CSV
-`timestamp_epoch_ms, timestamp_iso, elapsed_ms, lap, latitude, longitude, gps_altitude_m, gps_accuracy_m, speed_kmh, accel_x_ms2, accel_y_ms2, accel_z_ms2, g_force, pressure_hpa, baro_altitude_m, pitch_deg, roll_deg, temperature_c`
+### Arquivos gerados por corrida
+
+| Arquivo | Taxa | Conteúdo |
+|---|---|---|
+| `EcoOctano_<data>_S<id>.csv` | 5 Hz | Posição e velocidade **fundidas** (Kalman) + GPS **bruto** + sensores filtrados |
+| `EcoOctano_<data>_S<id>_imu.csv` | ~100 Hz | Leituras **brutas**: `ACC` (com gravidade), `LIN` (sem gravidade), `GYR` (rad/s), `BAR` (hPa) |
+| `EcoOctano_<data>_S<id>.json` | 5 Hz | Mesmo conteúdo do CSV + voltas e resumo da sessão |
+
+Colunas do CSV de 5 Hz:
+`timestamp_epoch_ms, timestamp_iso, elapsed_ms, lap, latitude, longitude, gps_altitude_m, gps_accuracy_m, speed_kmh, accel_x_ms2, accel_y_ms2, accel_z_ms2, g_force, pressure_hpa, baro_altitude_m, pitch_deg, roll_deg, temperature_c, gps_latitude_raw, gps_longitude_raw, gps_speed_raw_kmh`
+
+Colunas do CSV IMU: `race_elapsed_ms, sensor_time_ms, sensor, x, y, z`. O `race_elapsed_ms` usa a mesma base do `elapsed_ms` do CSV de 5 Hz, então os dois arquivos podem ser cruzados.
 
 Uma célula vazia significa sensor indisponível ou GPS sem fix naquele instante.
 
@@ -56,4 +71,6 @@ Uma célula vazia significa sensor indisponível ou GPS sem fix naquele instante
 - **Temperatura:** o S23 não tem `TYPE_AMBIENT_TEMPERATURE`, então o app usa a temperatura da bateria (`ACTION_BATTERY_CHANGED`). O valor mede a temperatura interna do aparelho, não a do ar.
 - **GPS a 5 Hz:** o app pede 200 ms ao Fused Provider, mas a taxa real depende do chipset e do sinal. A gravação amostra sempre a 5 Hz. Um fix com mais de 2,5 s é tratado como "sinal perdido" e grava lat/lon/velocidade vazios.
 - **Mapa:** os segmentos com a mesma cor (matiz quantizado em 5°) são agrupados numa única `Polyline`, o que mantém o mapa fluido em corridas longas. As tiles visualizadas ficam em cache, o que ajuda em pistas com sinal ruim.
-- **Segundo plano:** a corrida continua gravando se o app sair da tela, mas o Android pode reduzir a taxa do GPS. Para garantir a gravação com a tela apagada, o próximo passo seria um Foreground Service de localização.
+- **Filtro de Kalman (GPS + acelerômetro):** estado `[posição, velocidade, viés]` por eixo (leste/norte). A predição roda a 100 Hz com a aceleração linear rotacionada para o mundo, e a correção usa cada fix de GPS (posição + velocidade Doppler). Estimar o viés é o que torna o filtro robusto a erro de orientação. Em simulação (GPS ±4 m a 1 Hz, viés de até 0,4 m/s²), o erro RMS de velocidade caiu de 1,44 para 0,78 km/h e o de posição de 6,8 para 1,5 m. **Isso ainda precisa ser validado na pista**, comparando `speed_kmh` com `gps_speed_raw_kmh`.
+- **Tela apagada:** ao INICIAR, um serviço em primeiro plano (notificação "Eco Octano Telemetry") mantém GPS, sensores e gravação ativos com a tela apagada ou com outro app aberto. Ele é encerrado ao SALVAR ou RESETAR.
+- **Bateria no S23:** em *Configurações → Aplicativos → Eco Octano Telemetry → Bateria*, escolha **Sem restrições**. Sem isso, a economia de energia da Samsung pode encerrar o app durante corridas longas.

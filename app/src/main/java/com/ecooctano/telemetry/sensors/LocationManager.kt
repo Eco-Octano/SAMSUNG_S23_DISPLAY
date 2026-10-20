@@ -29,12 +29,18 @@ data class GpsReading(
     val longitude: Double,
     val altitudeM: Double?,
     val accuracyM: Float?,
+    /** Velocidade exibível (km/h), com zona morta de parado. */
     val speedKmh: Float,
+    /** Velocidade bruta do GNSS em m/s (sem zona morta), null se o fix não trouxer. */
+    val rawSpeedMs: Float?,
+    val speedAccuracyMs: Float?,
     val bearingDeg: Float?,
     /** Horário UTC do fix (Location.time). */
     val fixTimeMs: Long,
     /** SystemClock.elapsedRealtime() no recebimento — usado para detectar dados velhos. */
     val receivedAtRealtimeMs: Long,
+    /** Location.elapsedRealtimeNanos: mesma base de tempo dos SensorEvent. */
+    val elapsedRealtimeNanos: Long,
 )
 
 /**
@@ -72,6 +78,10 @@ class LocationManager(context: Context) {
 
     private val _status = MutableStateFlow(if (client == null) GpsStatus.UNAVAILABLE else GpsStatus.SEARCHING)
     val status: StateFlow<GpsStatus> = _status.asStateFlow()
+
+    /** Chamado na Main thread a cada fix válido (ex.: filtro de Kalman). */
+    @Volatile
+    var fixListener: ((GpsReading) -> Unit)? = null
 
     private var updatesActive = false
     private var previousLocation: Location? = null
@@ -157,16 +167,25 @@ class LocationManager(context: Context) {
         if (speedKmh < STATIONARY_THRESHOLD_KMH) speedKmh = 0f
 
         previousLocation = Location(loc)
-        _location.value = GpsReading(
+        val reading = GpsReading(
             latitude = lat,
             longitude = lon,
             altitudeM = if (loc.hasAltitude()) loc.altitude.takeIf { it.isFinite() } else null,
             accuracyM = if (loc.hasAccuracy()) loc.accuracy.takeIf { it.isFinite() } else null,
             speedKmh = speedKmh,
+            rawSpeedMs = if (loc.hasSpeed() && loc.speed.isFinite()) loc.speed else null,
+            speedAccuracyMs = if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond.takeIf { it.isFinite() } else null,
             bearingDeg = if (loc.hasBearing()) loc.bearing.takeIf { it.isFinite() } else null,
             fixTimeMs = loc.time,
             receivedAtRealtimeMs = SystemClock.elapsedRealtime(),
+            elapsedRealtimeNanos = loc.elapsedRealtimeNanos.takeIf { it > 0L } ?: SystemClock.elapsedRealtimeNanos(),
         )
+        _location.value = reading
         _status.value = GpsStatus.ACTIVE
+        try {
+            fixListener?.invoke(reading)
+        } catch (t: Throwable) {
+            Log.w(TAG, "fixListener falhou", t)
+        }
     }
 }

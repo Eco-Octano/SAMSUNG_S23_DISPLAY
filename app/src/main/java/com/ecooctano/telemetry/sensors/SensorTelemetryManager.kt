@@ -22,6 +22,16 @@ import kotlin.math.sqrt
 
 enum class TemperatureSource { AMBIENT_SENSOR, BATTERY, UNAVAILABLE }
 
+/** Recebe cada leitura BRUTA (antes do filtro) na thread de sensores. */
+fun interface RawSensorListener {
+    fun onRawSample(type: Int, timestampNs: Long, x: Float, y: Float, z: Float)
+}
+
+/** Aceleração linear bruta rotacionada para o mundo: leste e norte (m/s²). */
+fun interface WorldAccelListener {
+    fun onWorldAccel(east: Float, north: Float, timestampNs: Long)
+}
+
 data class SensorAvailability(
     val linearAcceleration: Boolean,
     val gyroscope: Boolean,
@@ -71,7 +81,17 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         /** Peso do acelerômetro no filtro complementar (fallback sem ROTATION_VECTOR). */
         private const val COMPLEMENTARY_ACCEL_WEIGHT_WITH_GYRO = 0.02f
         private const val COMPLEMENTARY_ACCEL_WEIGHT_NO_GYRO = 0.1f
+        /** 100 Hz para os sensores inerciais (gravação bruta + filtro de Kalman). */
+        private const val IMU_PERIOD_US = 10_000
     }
+
+    /** Consumidor das leituras brutas (gravação IMU). Chamado na thread de sensores. */
+    @Volatile
+    var rawListener: RawSensorListener? = null
+
+    /** Consumidor da aceleração no referencial do mundo (filtro de Kalman). */
+    @Volatile
+    var worldAccelListener: WorldAccelListener? = null
 
     private val appContext = context.applicationContext
     private val sensorManager: SensorManager? =
@@ -125,6 +145,7 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
 
     // ---- Orientação (somente thread de sensores) ----
     private val rotationMatrix = FloatArray(9)
+    private var hasRotationMatrix = false
     private val up = FloatArray(3)
     private var hasUp = false
     private val refForward = FloatArray(3)
@@ -149,16 +170,14 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
                 val thread = HandlerThread("EcoOctano-Sensors").also { it.start() }
                 sensorThread = thread
                 val handler = Handler(thread.looper)
-                register(sm, linearAccelSensor, handler)
-                register(sm, gyroscopeSensor, handler)
-                register(sm, pressureSensor, handler)
-                register(sm, ambientTemperatureSensor, handler)
-                if (rotationVectorSensor != null) {
-                    register(sm, rotationVectorSensor, handler)
-                } else {
-                    // Fallback: acelerômetro bruto + giroscópio em filtro complementar.
-                    register(sm, accelerometerSensor, handler)
-                }
+                register(sm, linearAccelSensor, handler, IMU_PERIOD_US)
+                register(sm, gyroscopeSensor, handler, IMU_PERIOD_US)
+                // Acelerômetro bruto: gravado no arquivo IMU e, sem ROTATION_VECTOR,
+                // usado no filtro complementar de inclinação.
+                register(sm, accelerometerSensor, handler, IMU_PERIOD_US)
+                register(sm, rotationVectorSensor, handler, IMU_PERIOD_US)
+                register(sm, pressureSensor, handler, SensorManager.SENSOR_DELAY_GAME)
+                register(sm, ambientTemperatureSensor, handler, SensorManager.SENSOR_DELAY_NORMAL)
             } else {
                 Log.w(TAG, "SensorManager indisponível")
             }
@@ -179,6 +198,7 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
             sensorThread = null
             unregisterBatteryReceiver()
             lastGyroTimestampNs = 0L
+            hasRotationMatrix = false
             running = false
         }
     }
@@ -193,10 +213,10 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         calibrationRequested = true
     }
 
-    private fun register(sm: SensorManager, sensor: Sensor?, handler: Handler) {
+    private fun register(sm: SensorManager, sensor: Sensor?, handler: Handler, samplingPeriodUs: Int) {
         if (sensor == null) return
         try {
-            val ok = sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, handler)
+            val ok = sm.registerListener(this, sensor, samplingPeriodUs, handler)
             if (!ok) Log.w(TAG, "registerListener retornou false para ${sensor.name}")
         } catch (t: Throwable) {
             Log.w(TAG, "Falha ao registrar ${sensor.name}", t)
@@ -244,8 +264,10 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         val e = event ?: return
         val values = e.values ?: return
         try {
-            when (e.sensor?.type) {
-                Sensor.TYPE_LINEAR_ACCELERATION -> if (values.size >= 3) handleLinearAcceleration(values)
+            val type = e.sensor?.type ?: return
+            forwardRaw(type, e.timestamp, values)
+            when (type) {
+                Sensor.TYPE_LINEAR_ACCELERATION -> if (values.size >= 3) handleLinearAcceleration(values, e.timestamp)
                 Sensor.TYPE_GYROSCOPE -> if (values.size >= 3) handleGyroscope(values, e.timestamp)
                 Sensor.TYPE_ROTATION_VECTOR -> if (values.size >= 3) handleRotationVector(values)
                 Sensor.TYPE_ACCELEROMETER -> if (values.size >= 3) handleAccelerometer(values)
@@ -260,11 +282,30 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
-    private fun handleLinearAcceleration(v: FloatArray) {
+    private fun forwardRaw(type: Int, timestampNs: Long, v: FloatArray) {
+        val listener = rawListener ?: return
+        when (type) {
+            Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_LINEAR_ACCELERATION, Sensor.TYPE_GYROSCOPE ->
+                if (v.size >= 3) listener.onRawSample(type, timestampNs, v[0], v[1], v[2])
+            Sensor.TYPE_PRESSURE ->
+                if (v.isNotEmpty()) listener.onRawSample(type, timestampNs, v[0], 0f, 0f)
+        }
+    }
+
+    private fun handleLinearAcceleration(v: FloatArray, timestampNs: Long) {
         val x = v[0]
         val y = v[1]
         val z = v[2]
         if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
+        // Valor BRUTO no referencial do mundo para o filtro de Kalman (sem o EMA da tela).
+        // rotationMatrix converte aparelho -> mundo (X = leste, Y = norte, Z = cima).
+        val worldListener = worldAccelListener
+        if (worldListener != null && hasRotationMatrix) {
+            val r = rotationMatrix
+            val east = r[0] * x + r[1] * y + r[2] * z
+            val north = r[3] * x + r[4] * y + r[5] * z
+            worldListener.onWorldAccel(east, north, timestampNs)
+        }
         val fx = ema(accelX, x)
         val fy = ema(accelY, y)
         val fz = ema(accelZ, z)
@@ -278,6 +319,7 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         // Alguns firmwares entregam 5 valores; getRotationMatrixFromVector usa só os 4 primeiros.
         val vec = if (v.size > 4) v.copyOf(4) else v
         SensorManager.getRotationMatrixFromVector(rotationMatrix, vec)
+        hasRotationMatrix = true
         // 3ª linha da matriz = eixo Z do mundo ("para cima") no referencial do aparelho.
         up[0] = rotationMatrix[6]
         up[1] = rotationMatrix[7]

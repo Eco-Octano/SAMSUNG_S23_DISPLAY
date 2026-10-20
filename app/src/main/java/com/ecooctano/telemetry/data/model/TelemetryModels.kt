@@ -22,6 +22,8 @@ data class RaceSession(
     val pointCount: Int,
     /** Onde os arquivos CSV/JSON públicos foram gravados (ex.: "Documents/EcoOctano_Telemetry"). */
     val exportLocation: String? = null,
+    /** Nome do arquivo IMU bruto (~100 Hz) em filesDir/exports, se houver. */
+    val imuFileName: String? = null,
 )
 
 /**
@@ -53,6 +55,10 @@ data class LapData(
 
 /**
  * Amostra de telemetria gravada a 5 Hz. Campos nulos = sensor indisponível ("N/A").
+ *
+ * latitude/longitude/speedKmh = estimativa FUNDIDA (Kalman GPS + acelerômetro).
+ * gps*Raw = o último fix bruto do GNSS, para comparação. Sensores = valores filtrados (EMA);
+ * os valores brutos em alta frequência ficam no arquivo IMU separado.
  * Nunca usamos NaN porque o SQLite converte NaN em NULL e quebraria leituras não-nulas.
  */
 @Entity(
@@ -88,6 +94,9 @@ data class TelemetryPoint(
     val pitchDeg: Float?,
     val rollDeg: Float?,
     val temperatureC: Float?,
+    val gpsLatitudeRaw: Double? = null,
+    val gpsLongitudeRaw: Double? = null,
+    val gpsSpeedRawKmh: Float? = null,
 )
 
 /** Ponto do traçado no mapa (somente posições válidas de GPS). */

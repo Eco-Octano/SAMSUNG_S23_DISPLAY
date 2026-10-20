@@ -3,10 +3,21 @@ package com.ecooctano.telemetry
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import com.ecooctano.telemetry.data.TelemetryRepository
+import com.ecooctano.telemetry.data.db.AppDatabase
+import com.ecooctano.telemetry.data.export.TelemetryExporter
+import com.ecooctano.telemetry.recording.RaceRecorder
 import org.osmdroid.config.Configuration
 import java.io.File
 
 class EcoOctanoApp : Application() {
+
+    val repository: TelemetryRepository by lazy {
+        TelemetryRepository(AppDatabase.get(this), TelemetryExporter(this))
+    }
+
+    /** Gravador único do processo: sobrevive à tela apagada e à recriação da Activity. */
+    val recorder: RaceRecorder by lazy { RaceRecorder(this, repository) }
 
     override fun onCreate() {
         super.onCreate()
