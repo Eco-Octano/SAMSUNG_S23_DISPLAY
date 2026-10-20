@@ -26,6 +26,7 @@ import org.osmdroid.views.overlay.TilesOverlay
 
 private const val FOLLOW_ZOOM = 18.0
 private const val INITIAL_ZOOM = 5.0
+private const val TILE_SCALE_RATIO = 0.65f
 private val INITIAL_CENTER = GeoPoint(-15.7801, -47.9292) // Brasil
 
 /**
@@ -82,12 +83,15 @@ fun OsmTelemetryMap(
 
 private fun createTelemetryMapView(context: Context): MapView =
     MapView(context).apply {
+        // Tiles do OSM têm 256 px. Escalar pela densidade total do S23 (~2,6x) deixa o mapa
+        // borrado; ~1,7x mantém nitidez com rótulos ainda legíveis no painel.
+        setTilesScaledToDpi(false)
+        setTilesScaleFactor(maxOf(1f, context.resources.displayMetrics.density * TILE_SCALE_RATIO))
         setTileSource(TileSourceFactory.MAPNIK)
         setMultiTouchControls(true)
         zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-        setTilesScaledToDpi(true)
         setMinZoomLevel(3.0)
-        setMaxZoomLevel(20.0)
+        setMaxZoomLevel(19.0) // zoom máximo real dos tiles MAPNIK
         controller.setZoom(INITIAL_ZOOM)
         controller.setCenter(INITIAL_CENTER)
         // Tiles invertidos = mapa escuro coerente com o cockpit.

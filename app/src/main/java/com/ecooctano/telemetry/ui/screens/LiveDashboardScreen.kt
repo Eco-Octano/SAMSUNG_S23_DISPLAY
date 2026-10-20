@@ -1,7 +1,6 @@
 package com.ecooctano.telemetry.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,10 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationSearching
@@ -47,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,17 +56,24 @@ import com.ecooctano.telemetry.sensors.TemperatureSource
 import com.ecooctano.telemetry.ui.LiveSessionState
 import com.ecooctano.telemetry.ui.RaceStatus
 import com.ecooctano.telemetry.ui.TelemetryViewModel
-import com.ecooctano.telemetry.ui.components.AxisLine
-import com.ecooctano.telemetry.ui.components.CockpitCard
+import com.ecooctano.telemetry.ui.components.CockpitPanel
+import com.ecooctano.telemetry.ui.components.FitText
 import com.ecooctano.telemetry.ui.components.Fmt
-import com.ecooctano.telemetry.ui.components.LabeledValue
-import com.ecooctano.telemetry.ui.components.MonoValue
+import com.ecooctano.telemetry.ui.components.MiniStat
+import com.ecooctano.telemetry.ui.components.PanelLabel
+import com.ecooctano.telemetry.ui.components.SensorStrip
+import com.ecooctano.telemetry.ui.components.SensorStripValues
 import com.ecooctano.telemetry.ui.components.SpeedLegend
 import com.ecooctano.telemetry.ui.map.OsmTelemetryMap
 import com.ecooctano.telemetry.ui.map.SpeedColors
 import com.ecooctano.telemetry.ui.theme.CockpitColors
 import org.osmdroid.util.GeoPoint
 
+/**
+ * Cockpit ao vivo. O painel esquerdo usa toda a altura sem rolagem:
+ * velocidade + tempo decorrido (o que o piloto precisa ler de relance) ocupam o espaço
+ * que sobrar; sensores e botões têm altura fixa.
+ */
 @Composable
 fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modifier) {
     val live by viewModel.live.collectAsStateWithLifecycle()
@@ -83,24 +86,37 @@ fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modi
     var followCar by rememberSaveable { mutableStateOf(true) }
 
     val currentGps = gps
-    val freshGps: GpsReading? = if (live.gpsFresh) currentGps else null
+    val speedKmh = if (live.gpsFresh) currentGps?.speedKmh else null
     val carPosition = currentGps?.let { GeoPoint(it.latitude, it.longitude) }
 
     Row(
         modifier.fillMaxSize().padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // ---------------- Painel esquerdo: telemetria e controle de voltas
+        // ---------------- Painel esquerdo
         Column(
-            Modifier
-                .weight(1.15f)
-                .fillMaxHeight()
-                .verticalScroll(rememberScrollState()),
+            Modifier.weight(1.1f).fillMaxHeight(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SpeedPanel(live = live, speedKmh = freshGps?.speedKmh)
-            ChronoPanel(live)
-            SensorGrid(sensors, onZeroInclination = viewModel::calibrateInclination)
+            Row(
+                Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                SpeedPanel(
+                    speedKmh = speedKmh,
+                    live = live,
+                    modifier = Modifier.weight(1.1f).fillMaxHeight(),
+                )
+                ElapsedPanel(
+                    live = live,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
+            SensorStrip(
+                values = sensors.toStripValues(),
+                modifier = Modifier.fillMaxWidth().height(86.dp),
+                onLongPressInclination = viewModel::calibrateInclination,
+            )
             ControlButtons(
                 live = live,
                 onStartPause = viewModel::toggleRace,
@@ -110,7 +126,7 @@ fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modi
             )
         }
 
-        // ---------------- Painel direito: mapa estilo Strava
+        // ---------------- Painel direito: mapa
         Box(
             Modifier
                 .weight(1f)
@@ -155,7 +171,7 @@ fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modi
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
             title = { Text("Resetar sessão?") },
-            text = { Text("Todas as voltas e pontos NÃO salvos desta corrida serão descartados.") },
+            text = { Text("Todos os pontos NÃO salvos desta corrida serão descartados.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -172,124 +188,74 @@ fun LiveDashboardScreen(viewModel: TelemetryViewModel, modifier: Modifier = Modi
     }
 }
 
-@Composable
-private fun SpeedPanel(live: LiveSessionState, speedKmh: Float?) {
-    CockpitCard(title = "VELOCIDADE", modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1.4f), verticalAlignment = Alignment.Bottom) {
-                MonoValue(
-                    text = Fmt.num(speedKmh, 1),
-                    fontSize = 72.sp,
-                    color = SpeedColors.composeColor(speedKmh),
-                    fontWeight = FontWeight.Black,
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "km/h",
-                    color = CockpitColors.Label,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(bottom = 14.dp),
-                )
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                LabeledValue("MÉDIA", "${Fmt.num(live.avgSpeedKmh, 1)} km/h", valueSize = 16.sp)
-                LabeledValue("MÁXIMA", "${Fmt.num(live.maxSpeedKmh, 1)} km/h", valueSize = 16.sp)
-                LabeledValue("DISTÂNCIA", Fmt.distance(live.distanceMeters), valueSize = 16.sp)
-            }
-        }
-    }
-}
+private fun SensorReadings.toStripValues() = SensorStripValues(
+    gForce = gForce,
+    accelX = accelX,
+    accelY = accelY,
+    accelZ = accelZ,
+    pressureHpa = pressureHpa,
+    baroAltitudeM = baroAltitudeM,
+    pitchDeg = pitchDeg,
+    rollDeg = rollDeg,
+    temperatureC = temperatureC,
+    temperatureLabel = when (temperatureSource) {
+        TemperatureSource.AMBIENT_SENSOR -> "ambiente"
+        TemperatureSource.BATTERY -> "bateria"
+        TemperatureSource.UNAVAILABLE -> Fmt.NA
+    },
+)
 
 @Composable
-private fun ChronoPanel(live: LiveSessionState) {
-    CockpitCard(title = "CRONÔMETRO  •  ${live.pointCount} pts", modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            LabeledValue("TOTAL", Fmt.raceTime(live.elapsedMs), Modifier.weight(1f), valueSize = 17.sp)
-            LabeledValue(
-                "VOLTA ${live.lapNumber}",
-                Fmt.raceTime(live.lapElapsedMs),
-                Modifier.weight(1f),
-                valueSize = 17.sp,
-                valueColor = CockpitColors.Amber,
-            )
-            LabeledValue(
-                "MELHOR",
-                Fmt.raceTime(live.bestLapMs),
-                Modifier.weight(1f),
-                valueSize = 17.sp,
-                valueColor = CockpitColors.Green,
-            )
-            LabeledValue("ÚLTIMA", Fmt.raceTime(live.lastLapMs), Modifier.weight(1f), valueSize = 17.sp)
-        }
-    }
-}
-
-@Composable
-fun SensorGrid(sensors: SensorReadings, onZeroInclination: (() -> Unit)?) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        GForceCard(
-            gForce = sensors.gForce,
-            x = sensors.accelX,
-            y = sensors.accelY,
-            z = sensors.accelZ,
-            modifier = Modifier.weight(1f).height(96.dp),
+private fun SpeedPanel(speedKmh: Float?, live: LiveSessionState, modifier: Modifier = Modifier) {
+    CockpitPanel(modifier) {
+        PanelLabel("VELOCIDADE  km/h")
+        // Número em branco: máximo contraste sob sol. A cor da escala aparece na barra abaixo.
+        FitText(
+            text = Fmt.num(speedKmh, 1),
+            template = "88.8",
+            modifier = Modifier.fillMaxWidth().weight(1f),
         )
-        CockpitCard("BARÔMETRO", Modifier.weight(1f).height(96.dp)) {
-            MonoValue(Fmt.num(sensors.pressureHpa, 1), fontSize = 18.sp)
-            Text("hPa", color = CockpitColors.Label, fontSize = 10.sp)
-            AxisLine("Alt", "${Fmt.signed(sensors.baroAltitudeM, 1)} m")
-        }
-        val inclinationModifier = Modifier
-            .weight(1f)
-            .height(96.dp)
-            .let { base ->
-                if (onZeroInclination == null) {
-                    base
-                } else {
-                    base.pointerInput(onZeroInclination) {
-                        detectTapGestures(onLongPress = { onZeroInclination() })
-                    }
-                }
-            }
-        CockpitCard("INCLINAÇÃO", inclinationModifier) {
-            AxisLine("Pitch", "${Fmt.signed(sensors.pitchDeg, 1)}°")
-            AxisLine("Roll ", "${Fmt.signed(sensors.rollDeg, 1)}°")
-            if (onZeroInclination != null) {
-                Text("segure p/ zerar", color = CockpitColors.Label, fontSize = 9.sp)
-            }
-        }
-        TemperatureCard(
-            temperatureC = sensors.temperatureC,
-            source = sensors.temperatureSource,
-            modifier = Modifier.weight(1f).height(96.dp),
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(5.dp)
+                .background(
+                    if (speedKmh == null) CockpitColors.CardBorder else SpeedColors.composeColor(speedKmh),
+                    RoundedCornerShape(3.dp),
+                ),
         )
-    }
-}
-
-@Composable
-fun GForceCard(gForce: Float?, x: Float?, y: Float?, z: Float?, modifier: Modifier = Modifier) {
-    CockpitCard("FORÇA G", modifier) {
-        MonoValue("${Fmt.num(gForce, 2)} G", fontSize = 18.sp, color = CockpitColors.Amber)
-        AxisLine("X", Fmt.signed(x, 2))
-        AxisLine("Y", Fmt.signed(y, 2))
-        AxisLine("Z", Fmt.signed(z, 2))
-    }
-}
-
-@Composable
-fun TemperatureCard(
-    temperatureC: Float?,
-    source: TemperatureSource,
-    modifier: Modifier = Modifier,
-) {
-    CockpitCard("TEMPERATURA", modifier) {
-        MonoValue("${Fmt.num(temperatureC, 1)} °C", fontSize = 18.sp)
-        val label = when (source) {
-            TemperatureSource.AMBIENT_SENSOR -> "sensor ambiente"
-            TemperatureSource.BATTERY -> "bateria (interna)"
-            TemperatureSource.UNAVAILABLE -> Fmt.NA
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth()) {
+            MiniStat("MÉDIA", Fmt.num(live.avgSpeedKmh, 1), Modifier.weight(1f))
+            MiniStat("MÁXIMA", Fmt.num(live.maxSpeedKmh, 1), Modifier.weight(1f))
         }
-        Text(label, color = CockpitColors.Label, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ElapsedPanel(live: LiveSessionState, modifier: Modifier = Modifier) {
+    val (statusText, statusColor) = when (live.status) {
+        RaceStatus.IDLE -> "PRONTO" to CockpitColors.Label
+        RaceStatus.RUNNING -> "EM CORRIDA" to CockpitColors.Green
+        RaceStatus.PAUSED -> "PAUSADO" to CockpitColors.Amber
+    }
+    val elapsed = Fmt.elapsed(live.elapsedMs)
+    CockpitPanel(modifier) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            PanelLabel("TEMPO DECORRIDO", Modifier.weight(1f))
+            PanelLabel(statusText, color = statusColor)
+        }
+        FitText(
+            text = elapsed,
+            template = if (elapsed.length > 5) "8:88:88" else "88:88",
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            color = if (live.status == RaceStatus.PAUSED) CockpitColors.Amber else CockpitColors.Value,
+        )
+        Spacer(Modifier.height(11.dp))
+        Row(Modifier.fillMaxWidth()) {
+            MiniStat("VOLTA", live.lapNumber.toString(), Modifier.weight(0.7f))
+            MiniStat("DISTÂNCIA", Fmt.distance(live.distanceMeters), Modifier.weight(1.3f))
+        }
     }
 }
 
@@ -313,10 +279,10 @@ private fun ControlButtons(
             color = startColor,
             enabled = !live.isSaving,
             onClick = onStartPause,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1.3f),
         )
         BigButton(
-            label = "NOVA VOLTA",
+            label = "VOLTA",
             icon = Icons.Filled.Flag,
             color = CockpitColors.Blue,
             enabled = live.status == RaceStatus.RUNNING && !live.isSaving,
@@ -356,7 +322,7 @@ private fun BigButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(68.dp),
+        modifier = modifier.height(64.dp),
         shape = RoundedCornerShape(12.dp),
         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
         colors = ButtonDefaults.buttonColors(

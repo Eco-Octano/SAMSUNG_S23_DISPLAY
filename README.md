@@ -37,7 +37,7 @@ app/src/main/java/com/ecooctano/telemetry/
 | Ação | Como |
 |---|---|
 | Iniciar / pausar / retomar | Botão verde/âmbar **INICIAR** |
-| Fechar volta | **NOVA VOLTA** (toques com menos de 2 s de intervalo são ignorados) |
+| Marcar volta | **VOLTA**: só registra o número da volta nos dados; o piloto vê apenas o tempo decorrido. Toques com menos de 2 s de intervalo são ignorados |
 | Zerar a sessão | **RESETAR** e depois confirmar no diálogo |
 | Salvar | **SALVAR**: grava no Room e exporta `.csv` + `.json`; o snackbar oferece **COMPARTILHAR** |
 | Zerar a inclinação | Pressione e segure o card **INCLINAÇÃO** com o carro parado no plano |

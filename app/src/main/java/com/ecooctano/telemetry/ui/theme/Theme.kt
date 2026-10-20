@@ -15,6 +15,8 @@ object CockpitColors {
     val Amber = Color(0xFFFFC400)
     val Red = Color(0xFFFF5252)
     val Blue = Color(0xFF40C4FF)
+    /** Azul do logo Eco Octano. */
+    val Brand = Color(0xFF1B9DDB)
     val Label = Color(0xFF9E9E9E)
     val Value = Color(0xFFFFFFFF)
 }

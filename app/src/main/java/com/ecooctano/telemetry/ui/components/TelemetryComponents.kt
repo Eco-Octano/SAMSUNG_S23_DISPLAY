@@ -2,6 +2,13 @@ package com.ecooctano.telemetry.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +48,19 @@ object Fmt {
         if (ms == null || ms < 0) return "--:--.---"
         val totalSec = ms / 1000
         return String.format(Locale.US, "%02d:%02d.%03d", totalSec / 60, totalSec % 60, ms % 1000)
+    }
+
+    /** Tempo decorrido para o piloto: MM:SS (ou H:MM:SS acima de 1 hora). */
+    fun elapsed(ms: Long): String {
+        val totalSec = (ms.coerceAtLeast(0L)) / 1000
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val sec = totalSec % 60
+        return if (h > 0) {
+            String.format(Locale.US, "%d:%02d:%02d", h, m, sec)
+        } else {
+            String.format(Locale.US, "%02d:%02d", m, sec)
+        }
     }
 
     fun num(value: Float?, decimals: Int): String =
@@ -154,5 +174,211 @@ private fun LegendItem(color: Color, label: String) {
         Box(Modifier.size(10.dp).background(color, CircleShape))
         Spacer(Modifier.width(4.dp))
         Text(label, color = CockpitColors.Value, fontSize = 11.sp)
+    }
+}
+
+/**
+ * Texto que ocupa todo o espaço disponível (largura e altura), dimensionado por um
+ * [template] de tamanho fixo — assim a fonte não "pula" quando o valor muda de 9.9 para 10.0.
+ * Usa algarismos tabulares (mesma largura) sem o espaçamento exagerado da fonte monoespaçada.
+ */
+@Composable
+fun FitText(
+    text: String,
+    template: String,
+    modifier: Modifier = Modifier,
+    color: Color = CockpitColors.Value,
+    fontWeight: FontWeight = FontWeight.Black,
+) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.CenterStart) {
+        val chars = template.length.coerceAtLeast(1)
+        val byWidth = maxWidth.value / (chars * 0.6f)
+        val byHeight = if (maxHeight.value.isFinite()) maxHeight.value * 0.82f else byWidth
+        val sizeDp = minOf(byWidth, byHeight).coerceIn(10f, 220f)
+        val fontSize = with(LocalDensity.current) { sizeDp.dp.toSp() }
+        Text(
+            text = text,
+            color = if (text == Fmt.NA) CockpitColors.Label else color,
+            fontSize = fontSize,
+            lineHeight = fontSize,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/** Painel de fundo escuro que ocupa o espaço que receber. */
+@Composable
+fun CockpitPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .background(CockpitColors.Card, RoundedCornerShape(10.dp))
+            .border(1.dp, CockpitColors.CardBorder, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        content = content,
+    )
+}
+
+@Composable
+fun PanelLabel(text: String, modifier: Modifier = Modifier, color: Color = CockpitColors.Label) {
+    Text(
+        text,
+        modifier = modifier,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** Par rótulo/valor compacto usado nas linhas secundárias dos painéis. */
+@Composable
+fun MiniStat(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = CockpitColors.Value) {
+    Column(modifier) {
+        Text(label, color = CockpitColors.Label, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(
+            value,
+            color = if (value.startsWith(Fmt.NA)) CockpitColors.Label else valueColor,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+/** Valores exibidos na faixa de sensores (ao vivo ou no replay). */
+data class SensorStripValues(
+    val gForce: Float?,
+    val accelX: Float?,
+    val accelY: Float?,
+    val accelZ: Float?,
+    val pressureHpa: Float?,
+    val baroAltitudeM: Float?,
+    val pitchDeg: Float?,
+    val rollDeg: Float?,
+    val temperatureC: Float?,
+    val temperatureLabel: String,
+)
+
+/**
+ * Faixa com 4 blocos de sensores dimensionada para caber sem cortes em ~100 dp por bloco.
+ * [onLongPressInclination] (opcional) permite zerar a inclinação segurando o bloco.
+ */
+@Composable
+fun SensorStrip(
+    values: SensorStripValues,
+    modifier: Modifier = Modifier,
+    onLongPressInclination: (() -> Unit)? = null,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        SensorTile(
+            title = "FORÇA G",
+            value = Fmt.num(values.gForce, 2),
+            unit = "G",
+            valueColor = CockpitColors.Amber,
+            lines = listOf(
+                "X${Fmt.signed(values.accelX, 2)} Y${Fmt.signed(values.accelY, 2)}",
+                "Z${Fmt.signed(values.accelZ, 2)} m/s²",
+            ),
+            modifier = Modifier.weight(1.15f).fillMaxHeight(),
+        )
+        SensorTile(
+            title = "PRESSÃO hPa",
+            value = Fmt.num(values.pressureHpa, 1),
+            unit = null,
+            lines = listOf("Alt ${Fmt.signed(values.baroAltitudeM, 1)} m"),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
+        val inclinationModifier = Modifier
+            .weight(0.95f)
+            .fillMaxHeight()
+            .let { base ->
+                if (onLongPressInclination == null) {
+                    base
+                } else {
+                    base.pointerInput(onLongPressInclination) {
+                        detectTapGestures(onLongPress = { onLongPressInclination() })
+                    }
+                }
+            }
+        SensorTile(
+            title = "INCLINAÇÃO",
+            value = null,
+            unit = null,
+            lines = listOf(
+                "P ${Fmt.signed(values.pitchDeg, 1)}°",
+                "R ${Fmt.signed(values.rollDeg, 1)}°",
+            ),
+            linesSize = 15.sp,
+            modifier = inclinationModifier,
+        )
+        SensorTile(
+            title = "TEMP.",
+            value = Fmt.num(values.temperatureC, 1),
+            unit = "°C",
+            lines = listOf(values.temperatureLabel),
+            modifier = Modifier.weight(0.9f).fillMaxHeight(),
+        )
+    }
+}
+
+@Composable
+private fun SensorTile(
+    title: String,
+    value: String?,
+    unit: String?,
+    lines: List<String>,
+    modifier: Modifier = Modifier,
+    valueColor: Color = CockpitColors.Value,
+    linesSize: TextUnit = 11.sp,
+) {
+    Column(
+        modifier
+            .background(CockpitColors.Card, RoundedCornerShape(10.dp))
+            .border(1.dp, CockpitColors.CardBorder, RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        PanelLabel(title)
+        if (value != null) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    value,
+                    color = if (value == Fmt.NA) CockpitColors.Label else valueColor,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    softWrap = false,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+                if (unit != null && value != Fmt.NA) {
+                    Spacer(Modifier.width(3.dp))
+                    Text(unit, color = CockpitColors.Label, fontSize = 11.sp, modifier = Modifier.padding(bottom = 3.dp))
+                }
+            }
+        }
+        lines.forEach { line ->
+            Text(
+                line,
+                color = CockpitColors.Value,
+                fontSize = linesSize,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                style = TextStyle(fontFeatureSettings = "tnum"),
+            )
+        }
     }
 }

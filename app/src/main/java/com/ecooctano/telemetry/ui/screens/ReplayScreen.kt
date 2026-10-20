@@ -57,10 +57,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ecooctano.telemetry.data.model.RaceSession
 import com.ecooctano.telemetry.ui.ReplayState
 import com.ecooctano.telemetry.ui.TelemetryViewModel
-import com.ecooctano.telemetry.ui.components.AxisLine
 import com.ecooctano.telemetry.ui.components.CockpitCard
 import com.ecooctano.telemetry.ui.components.Fmt
 import com.ecooctano.telemetry.ui.components.LabeledValue
+import com.ecooctano.telemetry.ui.components.SensorStrip
+import com.ecooctano.telemetry.ui.components.SensorStripValues
 import com.ecooctano.telemetry.ui.components.MonoValue
 import com.ecooctano.telemetry.ui.components.SpeedLegend
 import com.ecooctano.telemetry.ui.map.OsmTelemetryMap
@@ -275,29 +276,21 @@ private fun ReplayContent(replay: ReplayState, viewModel: TelemetryViewModel, mo
                 }
 
                 // Sensores registrados naquele timestamp
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    GForceCard(
+                SensorStrip(
+                    values = SensorStripValues(
                         gForce = point?.gForce,
-                        x = point?.accelX,
-                        y = point?.accelY,
-                        z = point?.accelZ,
-                        modifier = Modifier.weight(1f).height(96.dp),
-                    )
-                    CockpitCard("BARÔMETRO", Modifier.weight(1f).height(96.dp)) {
-                        MonoValue(Fmt.num(point?.pressureHpa, 1), fontSize = 18.sp)
-                        Text("hPa", color = CockpitColors.Label, fontSize = 10.sp)
-                        AxisLine("Alt", "${Fmt.signed(point?.baroAltitudeM, 1)} m")
-                    }
-                    CockpitCard("INCLINAÇÃO", Modifier.weight(1f).height(96.dp)) {
-                        AxisLine("Pitch", "${Fmt.signed(point?.pitchDeg, 1)}°")
-                        AxisLine("Roll ", "${Fmt.signed(point?.rollDeg, 1)}°")
-                        AxisLine("GPS±", "${Fmt.num(point?.gpsAccuracyM, 1)} m")
-                    }
-                    CockpitCard("TEMPERATURA", Modifier.weight(1f).height(96.dp)) {
-                        MonoValue("${Fmt.num(point?.temperatureC, 1)} °C", fontSize = 18.sp)
-                        AxisLine("AltGPS", Fmt.num(point?.gpsAltitudeM?.toFloat(), 0))
-                    }
-                }
+                        accelX = point?.accelX,
+                        accelY = point?.accelY,
+                        accelZ = point?.accelZ,
+                        pressureHpa = point?.pressureHpa,
+                        baroAltitudeM = point?.baroAltitudeM,
+                        pitchDeg = point?.pitchDeg,
+                        rollDeg = point?.rollDeg,
+                        temperatureC = point?.temperatureC,
+                        temperatureLabel = "registrada",
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(86.dp),
+                )
             }
 
             PlaybackControls(replay, viewModel)

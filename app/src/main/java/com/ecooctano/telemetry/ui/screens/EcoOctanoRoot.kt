@@ -6,6 +6,17 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
+import com.ecooctano.telemetry.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -18,9 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -38,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -79,44 +86,7 @@ fun EcoOctanoRoot(viewModel: TelemetryViewModel) {
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         Row(Modifier.fillMaxSize()) {
-            NavigationRail(
-                modifier = Modifier.fillMaxHeight(),
-                containerColor = CockpitColors.Surface,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                header = {
-                    Text(
-                        "ECO\nOCTANO",
-                        color = CockpitColors.Green,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 12.sp,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                },
-            ) {
-                val itemColors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = Color.Black,
-                    selectedTextColor = CockpitColors.Green,
-                    indicatorColor = CockpitColors.Green,
-                    unselectedIconColor = CockpitColors.Label,
-                    unselectedTextColor = CockpitColors.Label,
-                )
-                NavigationRailItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.Speed, contentDescription = null) },
-                    label = { Text("AO VIVO", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
-                    colors = itemColors,
-                )
-                NavigationRailItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.History, contentDescription = null) },
-                    label = { Text("REPLAY", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
-                    colors = itemColors,
-                )
-            }
+            BrandRail(selectedTab = tab, onSelect = { tab = it })
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 when (tab) {
                     0 -> LiveDashboardScreen(viewModel)
@@ -162,5 +132,54 @@ fun shareFiles(context: Context, files: List<File>) {
         context.startActivity(chooser)
     } catch (e: Exception) {
         Log.e("ShareFiles", "Falha ao compartilhar", e)
+    }
+}
+
+/** Trilho lateral estreito com o logo da equipe e as duas abas. */
+@Composable
+private fun BrandRail(selectedTab: Int, onSelect: (Int) -> Unit) {
+    Column(
+        Modifier
+            .width(76.dp)
+            .fillMaxHeight()
+            .background(CockpitColors.Surface)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.eco_octano_logo),
+            contentDescription = "Eco Octano",
+            modifier = Modifier.size(60.dp),
+        )
+        RailItem(Icons.Filled.Speed, "AO VIVO", selectedTab == 0) { onSelect(0) }
+        RailItem(Icons.Filled.History, "REPLAY", selectedTab == 1) { onSelect(1) }
+    }
+}
+
+@Composable
+private fun RailItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .width(68.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) CockpitColors.Brand else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (selected) Color.Black else CockpitColors.Label,
+            modifier = Modifier.size(28.dp),
+        )
+        Text(
+            label,
+            color = if (selected) Color.Black else CockpitColors.Label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+        )
     }
 }
