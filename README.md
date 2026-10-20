@@ -28,7 +28,7 @@ Stack: AGP 8.5.2 · Gradle 8.9 · Kotlin 2.0.20 · KSP 2.0.20-1.0.25 · Compose 
 
 1. **No S23 (display):** toque na tela para mostrar os controles, depois **⋮ → Corridas salvas**. Use o botão de compartilhar de uma corrida, ou **COMPARTILHAR TODAS**. O app gera um pacote **`.ecooctano.zip`** com tudo: resumo, voltas, pontos de 5 Hz e o arquivo IMU de 100 Hz.
 2. **Envie o pacote** pelo meio que preferir: Quick Share (mais rápido entre aparelhos Samsung), Google Drive, WhatsApp, e-mail ou cabo USB. Depois de cada corrida salva, o pacote também fica em `Documents/EcoOctano_Telemetry`.
-3. **No Tab S9 (modo Análise):** toque em **IMPORTAR** e escolha o arquivo (Quick Share salva em *Downloads*). Também é possível tocar no arquivo e escolher "Abrir com Eco Octano Análise".
+3. **No Tab S9 (modo Análise):** toque em **IMPORTAR** e escolha o arquivo (Quick Share salva em *Downloads*). Também é possível tocar no arquivo e escolher "Abrir com Eco Octano Telemetry".
 4. Corridas repetidas (mesmo início e duração) são ignoradas. Importar o mesmo pacote duas vezes não duplica nada.
 
 O pacote é um `.zip` comum: no computador, abra e use `session.json` ou `imu.csv` direto em Python, MATLAB ou Excel.
