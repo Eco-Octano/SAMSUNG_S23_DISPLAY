@@ -89,7 +89,7 @@ import java.util.Locale
 private val DimLabel = Color(0xFF5E5E5E)
 
 @Composable
-fun DisplayRoot(viewModel: DisplayViewModel) {
+fun DisplayRoot(viewModel: DisplayViewModel, onSwitchToAnalysis: () -> Unit) {
     var showSessions by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val message by viewModel.message.collectAsStateWithLifecycle()
@@ -104,7 +104,7 @@ fun DisplayRoot(viewModel: DisplayViewModel) {
         if (showSessions) {
             DisplaySessionsScreen(viewModel, onBack = { showSessions = false })
         } else {
-            DisplayCockpit(viewModel, onOpenSessions = { showSessions = true })
+            DisplayCockpit(viewModel, onOpenSessions = { showSessions = true }, onSwitchToAnalysis = onSwitchToAnalysis)
         }
         SnackbarHost(snackbarHostState, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
@@ -117,7 +117,7 @@ fun DisplayRoot(viewModel: DisplayViewModel) {
  * Os controles aparecem com um toque e somem sozinhos durante a corrida.
  */
 @Composable
-fun DisplayCockpit(viewModel: DisplayViewModel, onOpenSessions: () -> Unit) {
+fun DisplayCockpit(viewModel: DisplayViewModel, onOpenSessions: () -> Unit, onSwitchToAnalysis: () -> Unit) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val gps by viewModel.gpsReading.collectAsStateWithLifecycle()
     val gpsStatus by viewModel.gpsStatus.collectAsStateWithLifecycle()
@@ -220,6 +220,7 @@ fun DisplayCockpit(viewModel: DisplayViewModel, onOpenSessions: () -> Unit) {
                 onSave = viewModel::saveAndExport,
                 onOpenSessions = onOpenSessions,
                 onCalibrate = viewModel::calibrateInclination,
+                onSwitchToAnalysis = onSwitchToAnalysis,
             )
         }
 
@@ -295,6 +296,7 @@ private fun ControlBar(
     onSave: () -> Unit,
     onOpenSessions: () -> Unit,
     onCalibrate: () -> Unit,
+    onSwitchToAnalysis: () -> Unit,
 ) {
     val (startLabel, startIcon, startColor) = when (live.status) {
         RaceStatus.IDLE -> Triple("INICIAR", Icons.Filled.PlayArrow, CockpitColors.Green)
@@ -349,6 +351,14 @@ private fun ControlBar(
                     onClick = {
                         menuOpen = false
                         onOpenSessions()
+                    },
+                )
+                DropdownMenuItem(
+                    // A gravação continua ao trocar de modo.
+                    text = { Text("Modo Análise (replay e gráficos)") },
+                    onClick = {
+                        menuOpen = false
+                        onSwitchToAnalysis()
                     },
                 )
                 DropdownMenuItem(

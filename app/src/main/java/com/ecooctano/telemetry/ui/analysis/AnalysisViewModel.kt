@@ -14,6 +14,7 @@ import com.ecooctano.telemetry.data.model.TrackPoint
 import com.ecooctano.telemetry.data.model.TrackSnapshot
 import com.ecooctano.telemetry.data.transfer.ParsedSession
 import com.ecooctano.telemetry.data.transfer.SessionPackageReader
+import com.ecooctano.telemetry.recording.LiveSessionState
 import com.ecooctano.telemetry.ui.UiMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +110,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     private val repository = app.repository
     private val events = app.events
     private val reader = SessionPackageReader(File(application.cacheDir, "import"))
+
+    /** Corrida em gravação neste aparelho (para o aviso de "voltar ao Display"). */
+    val recording: StateFlow<LiveSessionState> = app.recorder.live
 
     val message: StateFlow<UiMessage?> = events.message
     val shareRequests: SharedFlow<List<File>> = events.shareRequests

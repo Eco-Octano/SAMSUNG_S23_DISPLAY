@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,11 +88,12 @@ private val TWO_PANE_MIN_WIDTH = 900.dp
 private val WIDE_DETAIL_MIN_WIDTH = 820.dp
 
 @Composable
-fun AnalysisRoot(viewModel: AnalysisViewModel) {
+fun AnalysisRoot(viewModel: AnalysisViewModel, onSwitchToDisplay: () -> Unit) {
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val recording by viewModel.recording.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     AppEventsEffect(message, viewModel.shareRequests, snackbarHostState, viewModel::consumeMessage)
 
@@ -100,12 +103,20 @@ fun AnalysisRoot(viewModel: AnalysisViewModel) {
     }
     val onImport = { importLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/json", "application/octet-stream")) }
 
-    Box(
+    Column(
         Modifier
             .fillMaxSize()
             .background(CockpitColors.Background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
+        if (recording.isSessionActive) {
+            RecordingBanner(
+                text = (if (recording.isRecording) "Gravando corrida" else "Corrida pausada") +
+                    " · ${Fmt.elapsed(recording.elapsedMs)} · ${Fmt.distance(recording.distanceMeters)}",
+                onClick = onSwitchToDisplay,
+            )
+        }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val twoPane = maxWidth >= TWO_PANE_MIN_WIDTH
             val hasSelection = state.session != null || state.isLoading
@@ -116,6 +127,7 @@ fun AnalysisRoot(viewModel: AnalysisViewModel) {
                     importing = importing,
                     onImport = onImport,
                     onShareAll = { viewModel.sharePackage(null) },
+                    onSwitchToDisplay = onSwitchToDisplay,
                     onOpen = viewModel::openSession,
                     onSharePackage = { viewModel.sharePackage(it) },
                     onShareCsv = { viewModel.shareCsv(it) },
@@ -141,6 +153,7 @@ fun AnalysisRoot(viewModel: AnalysisViewModel) {
             }
         }
         SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+        }
     }
 
     pendingDelete?.let { session ->
@@ -155,6 +168,24 @@ fun AnalysisRoot(viewModel: AnalysisViewModel) {
     }
 }
 
+/** Aviso fixo no topo enquanto há corrida em gravação neste aparelho. */
+@Composable
+private fun RecordingBanner(text: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF3A0D0D))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(10.dp).background(CockpitColors.Red, RoundedCornerShape(5.dp)))
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text("VOLTAR AO DISPLAY", color = CockpitColors.Amber, fontSize = 13.sp, fontWeight = FontWeight.Black)
+    }
+}
+
 // =================================================================== Lista
 
 @Composable
@@ -164,6 +195,7 @@ private fun SessionsPane(
     importing: Boolean,
     onImport: () -> Unit,
     onShareAll: () -> Unit,
+    onSwitchToDisplay: () -> Unit,
     onOpen: (Long) -> Unit,
     onSharePackage: (Long) -> Unit,
     onShareCsv: (Long) -> Unit,
@@ -177,6 +209,11 @@ private fun SessionsPane(
             Column(Modifier.weight(1f)) {
                 Text("ECO OCTANO", color = CockpitColors.Brand, fontSize = 16.sp, fontWeight = FontWeight.Black)
                 Text("Análise de telemetria", color = CockpitColors.Label, fontSize = 12.sp)
+            }
+            OutlinedButton(onClick = onSwitchToDisplay) {
+                Icon(Icons.Filled.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("DISPLAY")
             }
         }
         Spacer(Modifier.height(10.dp))

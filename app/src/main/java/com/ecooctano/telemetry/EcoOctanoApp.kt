@@ -7,6 +7,7 @@ import com.ecooctano.telemetry.data.TelemetryRepository
 import com.ecooctano.telemetry.data.db.AppDatabase
 import com.ecooctano.telemetry.data.export.TelemetryExporter
 import com.ecooctano.telemetry.recording.RaceRecorder
+import com.ecooctano.telemetry.ui.AppModeStore
 import com.ecooctano.telemetry.ui.UiEvents
 import org.osmdroid.config.Configuration
 import java.io.File
@@ -17,12 +18,15 @@ class EcoOctanoApp : Application() {
         TelemetryRepository(AppDatabase.get(this), TelemetryExporter(this))
     }
 
-    /** Snackbar e compartilhamento, comuns às versões display e análise. */
+    /** Snackbar e compartilhamento, comuns aos modos Display e Análise. */
     val events = UiEvents()
 
+    /** Modo escolhido (Display / Análise). */
+    val modeStore: AppModeStore by lazy { AppModeStore(this) }
+
     /**
-     * Gravador único do processo: sobrevive à tela apagada e à recriação da Activity.
-     * Só é criado na versão display (a análise nunca o acessa).
+     * Gravador único do processo: sobrevive à tela apagada, à troca de modo e à recriação
+     * da Activity. GPS e sensores só ligam no modo Display ou com corrida em andamento.
      */
     val recorder: RaceRecorder by lazy { RaceRecorder(this, repository, events) }
 

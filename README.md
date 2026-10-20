@@ -2,22 +2,25 @@
 
 Painel de telemetria (cockpit) e data logger do veículo de eficiência energética da equipe **Eco Octano**, otimizado para o **Samsung Galaxy S23** em paisagem.
 
-## Duas versões (mesmo código)
+## Um app, dois modos
 
-| Versão | Aparelho | App instalado | O que faz |
+Na primeira abertura, o app pergunta como o aparelho será usado. A escolha fica salva e pode ser trocada a qualquer momento:
+
+| Modo | Uso típico | O que faz | Como trocar |
 |---|---|---|---|
-| **display** | Galaxy S23 no carro | *Eco Octano Display* | Mapa, velocidade, tempo decorrido e distância. Grava a corrida (5 Hz + IMU 100 Hz) |
-| **analysis** | Galaxy Tab S9 ou qualquer Android | *Eco Octano Análise* | Importa corridas, replay no mapa, gráficos sincronizados, tabela de voltas. Não usa GPS |
+| **Display** | Galaxy S23 no carro | Mapa, velocidade, tempo decorrido e distância. Grava a corrida (5 Hz + IMU 100 Hz). Paisagem, tela sempre ligada | Toque na tela → **⋮ → Modo Análise** |
+| **Análise** | Galaxy Tab S9, celular ou o próprio S23 | Corridas salvas, replay no mapa, gráficos sincronizados, voltas, importar/exportar | Botão **DISPLAY** no topo da lista |
 
-As duas podem ficar instaladas no mesmo aparelho. A versão display mantém o mesmo identificador do app anterior: ela atualiza o app do S23 sem perder corridas.
+- **Qualquer aparelho pode gravar e ver os dados.** Basta escolher o modo.
+- **Gravação contínua:** se a corrida estiver gravando e você trocar para Análise, a gravação continua em segundo plano. Uma faixa vermelha no topo mostra o tempo e leva de volta ao Display.
+- **Corridas na hora:** as corridas salvas aparecem na Análise imediatamente, no mesmo aparelho.
+- **Importação direta:** abrir ou compartilhar um `.ecooctano.zip` para o app leva direto ao modo Análise e importa o pacote.
 
 ## Como compilar
 
 1. Abra a pasta no **Android Studio**.
-2. Em **View → Tool Windows → Build Variants**, escolha a variante do módulo `app`:
-   - `displayDebug` para o S23;
-   - `analysisDebug` para o Tab S9 (ou outro aparelho).
-3. Conecte o aparelho e clique em ▶. Para gerar os dois APKs de uma vez, use `./gradlew assembleDebug`. Eles saem em `app/build/outputs/apk/<versão>/debug/`.
+2. Conecte o aparelho e clique em ▶. Há uma única variante (`debug`). Pela linha de comando, use `./gradlew assembleDebug`, e o APK sai em `app/build/outputs/apk/debug/`.
+3. Instale o mesmo APK em todos os aparelhos (S23, Tab S9 etc.).
 
 Stack: AGP 8.5.2 · Gradle 8.9 · Kotlin 2.0.20 · KSP 2.0.20-1.0.25 · Compose BOM 2024.09.03 (Material 3) · Room 2.6.1 · OSMDroid 6.1.18 · Play Services Location 21.3.0 · minSdk 29 / targetSdk 34.
 
@@ -25,12 +28,12 @@ Stack: AGP 8.5.2 · Gradle 8.9 · Kotlin 2.0.20 · KSP 2.0.20-1.0.25 · Compose 
 
 1. **No S23 (display):** toque na tela para mostrar os controles, depois **⋮ → Corridas salvas**. Use o botão de compartilhar de uma corrida, ou **COMPARTILHAR TODAS**. O app gera um pacote **`.ecooctano.zip`** com tudo: resumo, voltas, pontos de 5 Hz e o arquivo IMU de 100 Hz.
 2. **Envie o pacote** pelo meio que preferir: Quick Share (mais rápido entre aparelhos Samsung), Google Drive, WhatsApp, e-mail ou cabo USB. Depois de cada corrida salva, o pacote também fica em `Documents/EcoOctano_Telemetry`.
-3. **No Tab S9 (análise):** toque em **IMPORTAR** e escolha o arquivo (Quick Share salva em *Downloads*). Também é possível tocar no arquivo e escolher "Abrir com Eco Octano Análise".
+3. **No Tab S9 (modo Análise):** toque em **IMPORTAR** e escolha o arquivo (Quick Share salva em *Downloads*). Também é possível tocar no arquivo e escolher "Abrir com Eco Octano Análise".
 4. Corridas repetidas (mesmo início e duração) são ignoradas. Importar o mesmo pacote duas vezes não duplica nada.
 
 O pacote é um `.zip` comum: no computador, abra e use `session.json` ou `imu.csv` direto em Python, MATLAB ou Excel.
 
-## Proteção contra marcação de tela (display)
+## Proteção contra marcação de tela (modo Display)
 
 A tela OLED do S23 pode reter imagem quando os mesmos pixels ficam acesos por muito tempo. O display faz o seguinte:
 - **Deslocamento de pixels:** a cada 30 s, todo o conteúdo anda até 4 dp num ciclo de 9 posições.
@@ -45,7 +48,7 @@ Também ajuda reduzir o brilho quando não estiver sob sol forte e não deixar o
 ```
 app/src/main/java/com/ecooctano/telemetry/
 ├── EcoOctanoApp.kt              # Configuração do OSMDroid (User-Agent, cache de tiles)
-├── MainActivity.kt              # Single-Activity, KEEP_SCREEN_ON, imersivo, ciclo de vida
+├── MainActivity.kt              # Single-Activity; aplica o modo (orientação, tela ligada, sensores)
 ├── data/
 │   ├── model/TelemetryModels.kt # RaceSession, LapData, TelemetryPoint (Room) + TrackPoint
 │   ├── db/AppDatabase.kt        # Room DB + DAO
@@ -61,8 +64,10 @@ app/src/main/java/com/ecooctano/telemetry/
 │   ├── LocationManager.kt         # FusedLocationProviderClient, alta precisão, 200 ms
 │   └── KalmanTrackFilter.kt       # Fusão GPS + acelerômetro com estimativa de viés
 └── ui/
-    ├── display/                   # Versão DISPLAY: cockpit, proteção contra burn-in, corridas salvas
-    ├── analysis/                  # Versão ANÁLISE: lista responsiva, replay, gráficos, importação
+    ├── AppMode.kt                 # Modo escolhido (Display / Análise), salvo nas preferências
+    ├── screens/ModeSelectionScreen.kt  # Tela de escolha do modo
+    ├── display/                   # Modo DISPLAY: cockpit, proteção contra burn-in, corridas salvas
+    ├── analysis/                  # Modo ANÁLISE: lista responsiva, replay, gráficos, importação
     ├── map/                       # OSMDroid no Compose + traçado colorido por velocidade
     ├── screens/PermissionGate.kt  # Permissão de localização (só display)
     ├── components/                # Formatação, compartilhamento, itens de lista
